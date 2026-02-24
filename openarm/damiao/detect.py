@@ -3,6 +3,8 @@
 This module provides functionality to scan and detect Damiao motors on the CAN bus.
 """
 
+from __future__ import annotations
+
 import argparse
 import struct
 import sys
@@ -16,6 +18,7 @@ from .config import MOTOR_CONFIGS
 from .encoding import RegisterAddress, encode_read_register
 
 
+
 @dataclass
 class MotorInfo:
     """Information about a detected motor."""
@@ -27,7 +30,7 @@ class MotorInfo:
 def detect_motors(
     bus: can.BusABC,
     slave_ids: Iterable[int],
-    timeout: float = 0.05,
+    timeout: float = 0.01,
 ) -> Generator[MotorInfo, None, None]:
     """Detect motors by sending register read requests and collecting responses.
 
@@ -207,8 +210,8 @@ def parse_arguments() -> argparse.Namespace:
         "--timeout",
         "-t",
         type=float,
-        default=0.1,
-        help="Timeout for motor detection in seconds (default: 0.1)",
+        default=0.01,
+        help="Timeout for motor detection in seconds (default: 0.01)",
     )
 
     return parser.parse_args()

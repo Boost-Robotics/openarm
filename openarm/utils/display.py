@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Terminal display utilities for formatted output with cursor control."""
 
 import re

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """OpenArm simulation wrapper and control utilities.
 
 This module provides a complete simulation environment for the OpenArm robot,
@@ -80,7 +82,7 @@ class OpenArmSimulation:
             )
             raise ValueError(msg)
 
-        for actuator, torque in zip(self._left_arm_actuators, torques, strict=False):
+        for actuator, torque in zip(self._left_arm_actuators, torques):
             self._set_actuator_torque(actuator, torque)
 
     def set_left_arm_positions(self, positions: Sequence[float]) -> None:
@@ -101,7 +103,7 @@ class OpenArmSimulation:
             raise ValueError(msg)
 
         for actuator, position in zip(
-            self._left_arm_actuators, positions, strict=False
+            self._left_arm_actuators, positions
         ):
             self._set_actuator_position(actuator, position)
 
@@ -130,7 +132,7 @@ class OpenArmSimulation:
             raise ValueError(msg)
 
         for actuator, target_pos in zip(
-            self._left_arm_actuators, target_positions, strict=False
+            self._left_arm_actuators, target_positions
         ):
             self._set_actuator_position_control(actuator, target_pos, kp, kd)
 
@@ -175,7 +177,7 @@ class OpenArmSimulation:
             )
             raise ValueError(msg)
 
-        for actuator, torque in zip(self._right_arm_actuators, torques, strict=False):
+        for actuator, torque in zip(self._right_arm_actuators, torques):
             self._set_actuator_torque(actuator, torque)
 
     def set_right_arm_positions(self, positions: Sequence[float]) -> None:
@@ -196,7 +198,7 @@ class OpenArmSimulation:
             raise ValueError(msg)
 
         for actuator, position in zip(
-            self._right_arm_actuators, positions, strict=False
+            self._right_arm_actuators, positions
         ):
             self._set_actuator_position(actuator, position)
 
@@ -225,7 +227,7 @@ class OpenArmSimulation:
             raise ValueError(msg)
 
         for actuator, target_pos in zip(
-            self._right_arm_actuators, target_positions, strict=False
+            self._right_arm_actuators, target_positions
         ):
             self._set_actuator_position_control(actuator, target_pos, kp, kd)
 

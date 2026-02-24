@@ -1,9 +1,14 @@
+from __future__ import annotations
+
 """Gravity compensation for robotic arms using MuJoCo physics simulation."""
 
 import argparse
 import asyncio
+import os
 import re
 import sys
+
+os.environ.setdefault("MUJOCO_GL", "disable")
 
 import mujoco
 import numpy as np
@@ -93,6 +98,74 @@ class MuJoCoKDL:
         mujoco.mj_inverse(self.model, self.data)
         return self.data.qfrc_inverse[joint_indices]
 
+    def compute_body_pose(
+        self, q: np.ndarray, body_name: str, side: str = "left"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute the world-frame pose of a body given joint angles.
+
+        Args:
+            q: Joint angles in radians.
+            body_name: MuJoCo body name to query.
+            side: "left" or "right".
+
+        Returns:
+            Tuple of (pos, quat) in world frame. quat is [w, x, y, z].
+        """
+        assert side in ("left", "right"), "side must be 'left' or 'right'"
+        length = len(q)
+        joint_indices = slice(0, length) if side == "left" else slice(9, 9 + length)
+        self.data.qpos[:] = 0
+        self.data.qvel[:] = 0
+        self.data.qpos[joint_indices] = q
+        mujoco.mj_forward(self.model, self.data)
+
+        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+        return self.data.xpos[body_id].copy(), self.data.xquat[body_id].copy()
+
+    def compute_forward_kinematics(
+        self, q: np.ndarray, side: str = "left"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute forward kinematics for the TCP body. Shorthand for compute_body_pose."""
+        return self.compute_body_pose(q, f"openarm_{side}_hand_tcp", side=side)
+
+    def compute_jacobian(
+        self, q: np.ndarray, side: str = "left"
+    ) -> np.ndarray:
+        """Compute the full 6 x n_joints Jacobian for the TCP body.
+
+        Rows 0-2 are translational (linear velocity), rows 3-5 are
+        rotational (angular velocity about world x, y, z).
+
+        Args:
+            q: Joint angles in radians.
+            side: "left" or "right".
+
+        Returns:
+            Jacobian of shape (6, len(q)).
+
+        """
+        assert side in ("left", "right"), "side must be 'left' or 'right'"
+        length = len(q)
+        joint_indices = slice(0, length) if side == "left" else slice(9, 9 + length)
+
+        self.data.qpos[:] = 0
+        self.data.qvel[:] = 0
+        self.data.qpos[joint_indices] = q
+
+        mujoco.mj_forward(self.model, self.data)
+
+        tcp_name = f"openarm_{side}_hand_tcp"
+        body_id = mujoco.mj_name2id(self.model, mujoco.mjtObj.mjOBJ_BODY, tcp_name)
+
+        nv = self.model.nv
+        jacp = np.zeros((3, nv))  # translational
+        jacr = np.zeros((3, nv))  # rotational
+        mujoco.mj_jacBody(self.model, self.data, jacp, jacr, body_id)
+
+        # Extract only the columns for this arm's joints
+        jac_indices = slice(0, length) if side == "left" else slice(9, 9 + length)
+        return np.vstack([jacp[:, jac_indices], jacr[:, jac_indices]])
+
 
 class GravityCompensator:
     """Gravity compensation calculator with persistent MuJoCo model."""
@@ -124,9 +197,171 @@ class GravityCompensator:
         return [
             torque * factor
             for torque, factor in zip(
-                gravity_torques, self.tuning_factors, strict=False
+                gravity_torques, self.tuning_factors
             )
         ]
+
+    def forward_kinematics(
+        self, angles: list[float], position: str = "left"
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Compute forward kinematics (end-effector pose) for given joint angles.
+
+        Args:
+            angles: List of joint angles in radians.
+            position: "left" or "right" arm.
+
+        Returns:
+            Tuple of (pos, quat) where pos is the 3-D TCP position [x, y, z]
+            and quat is the orientation as a unit quaternion [w, x, y, z].
+
+        """
+        return self.kdl.compute_forward_kinematics(np.array(angles), side=position)
+
+    def inverse_kinematics(
+        self,
+        target_pos: np.ndarray,
+        target_quat: np.ndarray | None = None,
+        seed_angles: list[float] | None = None,
+        position: str = "left",
+        max_iter: int = 200,
+        pos_tol: float = 1e-3,
+        ori_tol: float = 1e-2,
+        damping: float = 1e-3,
+        step_size: float = 0.5,
+    ) -> np.ndarray:
+        """Solve IK using damped least-squares with the MuJoCo model.
+
+        Args:
+            target_pos: Desired TCP position [x, y, z].
+            target_quat: Desired TCP orientation [w, x, y, z].
+                If None, only position is targeted.
+            seed_angles: Initial joint angle guess (7 joints).
+                If None, uses zeros.
+            position: "left" or "right" arm.
+            max_iter: Maximum solver iterations.
+            pos_tol: Position convergence tolerance (metres).
+            ori_tol: Orientation convergence tolerance (rad).
+            damping: Damped least-squares regularisation.
+            step_size: Step size for joint updates.
+
+        Returns:
+            Array of 7 joint angles in radians.
+
+        """
+        n = 7
+        q = np.array(seed_angles[:n], dtype=np.float64) if seed_angles else np.zeros(n)
+
+        # Joint limits from MuJoCo model
+        joint_lo = np.zeros(n)
+        joint_hi = np.zeros(n)
+        joint_offset = 0 if position == "left" else 9
+        for i in range(n):
+            jid = joint_offset + i
+            if self.kdl.model.jnt_limited[jid]:
+                joint_lo[i] = self.kdl.model.jnt_range[jid, 0]
+                joint_hi[i] = self.kdl.model.jnt_range[jid, 1]
+            else:
+                joint_lo[i] = -np.pi
+                joint_hi[i] = np.pi
+
+        pos_only = target_quat is None
+
+        for _ in range(max_iter):
+            tcp_pos, tcp_quat = self.kdl.compute_forward_kinematics(q, side=position)
+
+            pos_err = target_pos - tcp_pos
+            if pos_only:
+                err = pos_err
+                jac = self.kdl.compute_jacobian(q, side=position)[:3]  # 3×N
+            else:
+                ori_err_body = np.zeros(3)
+                tgt = target_quat.copy()
+                if np.dot(tgt, tcp_quat) < 0:
+                    tgt = -tgt
+                mujoco.mju_subQuat(ori_err_body, tgt, tcp_quat)
+                R_tcp = np.zeros(9)
+                mujoco.mju_quat2Mat(R_tcp, tcp_quat)
+                ori_err = R_tcp.reshape(3, 3) @ ori_err_body
+                err = np.concatenate([pos_err, ori_err])
+                jac = self.kdl.compute_jacobian(q, side=position)  # 6×N
+
+            if np.linalg.norm(pos_err) < pos_tol:
+                if pos_only or np.linalg.norm(ori_err) < ori_tol:
+                    break
+
+            # Damped least-squares: dq = J^T (J J^T + λI)^{-1} err
+            JJT = jac @ jac.T + damping * np.eye(jac.shape[0])
+            dq = jac.T @ np.linalg.solve(JJT, err)
+
+            q = q + step_size * dq
+            q = np.clip(q, joint_lo, joint_hi)
+
+        return q
+
+    def impedance_torques(
+        self,
+        angles: list[float],
+        setpoint: dict[int, float],
+        lock_orientation: bool = False,
+        ori_quat: np.ndarray | None = None,
+        position: str = "left",
+        stiffness: float = 200.0,
+        rot_stiffness: float = 5.0,
+    ) -> list[float]:
+        """Compute joint torques for Cartesian impedance control via J^T.
+
+        Only the axes present in *setpoint* contribute a translational
+        restoring force.  When *lock_orientation* is ``True`` the full
+        orientation is held at *ori_quat* (all three rotation axes).
+
+        ``tau = J^T @ wrench``
+
+        Args:
+            angles: Current joint angles in radians.
+            setpoint: ``{axis: value}`` for translational axes (0=x, 1=y,
+                2=z in metres).
+            lock_orientation: If True, apply a restoring torque on all three
+                rotation axes to hold the orientation given by *ori_quat*.
+            ori_quat: Desired orientation as a unit quaternion [w,x,y,z].
+                Required when *lock_orientation* is True.
+            position: "left" or "right" arm.
+            stiffness: Translational spring constant (N/m).
+            rot_stiffness: Rotational spring constant (N·m/rad).
+
+        Returns:
+            List of impedance joint torques (same length as *angles*).
+
+        """
+        q = np.array(angles)
+
+        tcp_pos, tcp_quat = self.kdl.compute_forward_kinematics(q, side=position)
+
+        wrench = np.zeros(6)
+
+        for axis in (0, 1, 2):
+            if axis in setpoint:
+                wrench[axis] = stiffness * (setpoint[axis] - tcp_pos[axis])
+
+        if lock_orientation and ori_quat is not None:
+            # Ensure quaternions are in the same hemisphere to avoid sign flip
+            target = ori_quat.copy()
+            if np.dot(target, tcp_quat) < 0:
+                target = -target
+
+            # mju_subQuat returns error in tcp_quat's body frame
+            ori_err_body = np.zeros(3)
+            mujoco.mju_subQuat(ori_err_body, target, tcp_quat)
+
+            # Rotate error from body frame to world frame (Jacobian is world-frame)
+            R_tcp = np.zeros(9)
+            mujoco.mju_quat2Mat(R_tcp, tcp_quat)
+            ori_err_world = R_tcp.reshape(3, 3) @ ori_err_body
+
+            wrench[3:6] = rot_stiffness * ori_err_world
+
+        jac = self.kdl.compute_jacobian(q, side=position)
+        tau = jac.T @ wrench
+        return tau.tolist()
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -255,7 +490,7 @@ async def _main(selected_buses: list) -> list[ArmWithGravity]:  # noqa: C901, PL
     for _bus_idx, (can_bus, arm_position) in enumerate(selected_buses):
         # First use detect_motors to check if ALL motors are present
         slave_ids = [config.slave_id for config in MOTOR_CONFIGS]
-        detected = list(detect_motors(can_bus, slave_ids, timeout=0.1))
+        detected = list(detect_motors(can_bus, slave_ids, timeout=0.01))
         detected_ids = {info.slave_id for info in detected}
 
         # Check if ALL required motors are detected

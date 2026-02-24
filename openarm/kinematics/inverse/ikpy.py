@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Inverse kinematics implementation for OpenArm using IKPy library."""
 
 import ikpy.chain

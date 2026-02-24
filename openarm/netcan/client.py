@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """NetCAN Client implementation."""
 
 import json

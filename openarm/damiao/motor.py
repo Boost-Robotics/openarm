@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Damiao motor control package for OpenArm.
 
 High-level interface for controlling Damiao motors through CAN bus communication.

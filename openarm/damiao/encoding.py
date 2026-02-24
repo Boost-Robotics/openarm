@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Damiao motor encoding/decoding functions.
 
 Provides utilities for constructing CAN messages to control Damiao motors,
@@ -243,7 +245,9 @@ async def decode_register_int(bus: Bus, master_id: int) -> int:
     # Wait for register response with master arbitration ID
     # Timeout to prevent indefinite blocking
     # Reference: Register response handling in DM_CAN.py switchControlMode retry loop
-    message = bus.recv(master_id, timeout=0.1)
+    message = bus.recv(master_id, timeout=0.01)
+    if message is None:
+        raise TimeoutError(f"No register INT response for master_id={master_id}")
 
     # Unpack register response data in single operation
     # Format: '<HBBI' = slave_id(H) + command_code(B) + register_id(B) + value(I)
@@ -269,7 +273,9 @@ async def decode_register_float(bus: Bus, master_id: int) -> float:
     # Wait for register response with master arbitration ID
     # Timeout to prevent indefinite blocking
     # Reference: Register response handling in DM_CAN.py switchControlMode retry loop
-    message = bus.recv(master_id, timeout=0.1)
+    message = bus.recv(master_id, timeout=0.01)
+    if message is None:
+        raise TimeoutError(f"No register FLOAT response for master_id={master_id}")
 
     # Unpack register response data in single operation
     # Format: '<HBBf' = slave_id(H) + command_code(B) + register_id(B) + value(f)
@@ -331,7 +337,7 @@ def encode_control_mit(
 
 async def decode_motor_state(
     bus: Bus, master_id: int, motor_limits: MotorLimits
-) -> MotorState:
+) -> MotorState | None:
     """Decode motor state response. Waits for motor state feedback.
 
     Args:
@@ -350,7 +356,9 @@ async def decode_motor_state(
     # Wait for motor state response with motor's master ID
     # Timeout to prevent indefinite blocking
     # Reference: Motor state response handling in DM_CAN.py recv calls after controlMIT
-    message = bus.recv(master_id, timeout=0.1)
+    message = bus.recv(master_id, timeout=0.01)
+    if message is None:
+        return None
 
     # Unpack motor state response data according to protocol format
     # Format: ID|ERR<<4 | POS[15:0] | VEL[11:4] | VEL[3:0]|T[11:8] | T[7:0] |
@@ -400,6 +408,49 @@ async def decode_motor_state(
     )
 
 
+def decode_motor_state_sync(
+    bus: Bus, master_id: int, motor_limits: MotorLimits
+) -> MotorState | None:
+    """Synchronous version of decode_motor_state for use in threads.
+
+    Identical to decode_motor_state but without async, for use with
+    asyncio.to_thread() to enable true cross-bus parallelism.
+    """
+    message = bus.recv(master_id, timeout=0.01)
+    if message is None:
+        return None
+
+    byte0, q_uint, vel_h, vel_t, torque_l, t_mos, t_rotor = struct.unpack(
+        ">BHBBBBB", message.data[:8]
+    )
+
+    slave_id = byte0 & 0xF
+    status = (byte0 >> 4) & 0xF
+
+    dq_uint = (vel_h << 4) | ((vel_t >> 4) & 0xF)
+    tau_uint = ((vel_t & 0xF) << 8) | torque_l
+
+    q_max, dq_max, tau_max = (
+        motor_limits.q_max,
+        motor_limits.dq_max,
+        motor_limits.tau_max,
+    )
+
+    position = _uint_to_float(q_uint, -q_max, q_max, 16)
+    velocity = _uint_to_float(dq_uint, -dq_max, dq_max, 12)
+    torque = _uint_to_float(tau_uint, -tau_max, tau_max, 12)
+
+    return MotorState(
+        status=status,
+        slave_id=slave_id,
+        position=position,
+        velocity=velocity,
+        torque=torque,
+        temp_mos=t_mos,
+        temp_rotor=t_rotor,
+    )
+
+
 async def decode_save_response(bus: Bus, master_id: int) -> SaveResponse:
     """Decode save parameters response. Waits for save confirmation.
 
@@ -415,7 +466,9 @@ async def decode_save_response(bus: Bus, master_id: int) -> SaveResponse:
     """
     # Wait for save response with motor's master ID
     # Timeout to prevent indefinite blocking
-    message = bus.recv(master_id, timeout=0.1)
+    message = bus.recv(master_id, timeout=0.01)
+    if message is None:
+        return SaveResponse(slave_id=0, success=False)
 
     # Unpack save response data
     # Format: '<HBB' = little-endian: slave_id(H) + command(B) + status(B)

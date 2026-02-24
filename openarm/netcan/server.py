@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """NetCAN Server implementation."""
 
 from can import BusABC

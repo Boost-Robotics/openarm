@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Track min/max angle ranges for Damiao motors.
 
 This script disables all Damiao motors and continuously displays their current angles
@@ -121,7 +123,7 @@ async def set_zero(
     sys.stdout.write(f"\r\n{CYAN}Setting zero position for all motors...{RESET}\r\n")
 
     for motor, tracker, config in zip(
-        motors_list, trackers_list, motor_configs, strict=False
+        motors_list, trackers_list, motor_configs
     ):
         if motor is None or tracker is None:
             continue
@@ -211,7 +213,7 @@ async def _main(
     slave_ids = [config.slave_id for config in motor_configs]
 
     # Detect motors using raw CAN bus
-    detected = list(detect_motors(can_bus, slave_ids, timeout=0.1))
+    detected = list(detect_motors(can_bus, slave_ids, timeout=0.01))
 
     sys.stdout.write("\r\nMotor Status:\r\n")
 

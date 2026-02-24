@@ -108,7 +108,7 @@ async def _main(can_bus: can.BusABC, args: argparse.Namespace) -> None:
     # Detect motors
     sys.stdout.write(f"Scanning for motors on {args.interface}:{args.channel}...\n")
     slave_ids = [config.slave_id for config in MOTOR_CONFIGS]
-    detected = list(detect_motors(can_bus, slave_ids, timeout=0.1))
+    detected = list(detect_motors(can_bus, slave_ids, timeout=0.01))
 
     if not detected:
         sys.stderr.write(f"{RED}No motors detected. Exiting.{RESET}\n")

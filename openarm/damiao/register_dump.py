@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Dump all register values for detected Damiao motors.
 
 This script detects motors on all CAN buses and reads all their register values,
@@ -174,7 +176,7 @@ async def dump_registers_for_bus(  # noqa: C901, PLR0912
     # Detect motors on this bus
     sys.stdout.write(f"Scanning for motors on bus {bus_idx + 1}...\n")
     slave_ids = [config.slave_id for config in MOTOR_CONFIGS]
-    detected = list(detect_motors(can_bus, slave_ids, timeout=0.1))
+    detected = list(detect_motors(can_bus, slave_ids, timeout=0.01))
 
     if not detected:
         sys.stdout.write(

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Motor configuration for Damiao motors."""
 
 from dataclasses import dataclass

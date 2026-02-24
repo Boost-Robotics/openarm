@@ -55,7 +55,7 @@ async def _main(can_buses: list) -> None:
         slave_ids = [config.slave_id for config in MOTOR_CONFIGS]
 
         # Detect motors using raw CAN bus
-        detected = list(detect_motors(can_bus, slave_ids, timeout=0.1))
+        detected = list(detect_motors(can_bus, slave_ids, timeout=0.01))
 
         if not detected:
             sys.stdout.write(

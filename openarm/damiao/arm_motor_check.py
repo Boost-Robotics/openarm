@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Arm motor check script for OpenArm.
 
 This script checks all configured arm motors by moving them through their
@@ -278,7 +280,7 @@ def check_motors_present(
     expected_slave_ids = [motor.slave_id for motor in expected_motors]
 
     # Detect motors on the bus
-    detected = list(detect_motors(can_bus, expected_slave_ids, timeout=0.1))
+    detected = list(detect_motors(can_bus, expected_slave_ids, timeout=0.01))
     detected_slave_ids = {info.slave_id for info in detected}
 
     # Check which motors are missing

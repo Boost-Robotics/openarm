@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 """Arm control module for coordinating multiple Damiao motors."""
 
 import asyncio
