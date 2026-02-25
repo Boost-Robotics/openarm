@@ -1,3 +1,8 @@
+# Commands for Boost
+
+python3 -m openarm.damiao.monitor -t --gravity   --follow leader_l:left:follower_l:left   --follow leader_r:right:follower_r:right --velocity 2.0
+
+
 # Anvil Robotics's OpenArm Experimental Testing Tools
 
 This repository contains a variety of python scripts and debugging tools for validating Anvil Robotics's OpenArm hardware platform. Please note that this code is very experimental.
